@@ -1,0 +1,35 @@
+{
+  "name": "@phos/phos-mcp-bridge",
+  "version": "0.1.0",
+  "description": "A stdio-to-Streamable-HTTP MCP transport bridge for PHOS",
+  "type": "module",
+  "bin": {
+    "phos-mcp-bridge": "./dist/index.js"
+  },
+  "exports": "./dist/index.js",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "lint": "npm run typecheck"
+  },
+  "keywords": ["mcp", "phos", "bridge", "stdio", "streamable-http"],
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@modelcontextprotocol/core": "^2.4.0",
+    "@modelcontextprotocol/server": "^2.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}
