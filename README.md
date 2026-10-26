@@ -1,9 +1,9 @@
 # PHOS MCP Bridge
 
-`@phos/phos-mcp-bridge` is a standalone Node.js 20+ transport bridge for a
-remote PHOS MCP server. It exposes MCP over local stdio and forwards it to
-PHOS over MCP Streamable HTTP. It does not start PHOS or include PHOS runtime,
-robot, hardware, or Python dependencies.
+`phos-mcp-bridge` is a standalone Node.js 20+ transport bridge for a remote
+PHOS MCP server. It exposes MCP over local stdio and forwards it to PHOS over
+MCP Streamable HTTP. It does not start PHOS or include PHOS runtime, robot,
+hardware, or Python dependencies.
 
 ```text
 MCP stdio client → phos-mcp-bridge → MCP Streamable HTTP → PHOS
@@ -14,77 +14,80 @@ The remote server remains authoritative. The bridge dynamically forwards
 change. Tool results, input schemas, metadata, structured output, and tool
 error results pass through unchanged.
 
-## Install and run
+## Build and run locally
+
+This package is not published to npm yet. Build it from this repository:
 
 ```bash
-npm install -g @phos/phos-mcp-bridge
-phos-mcp-bridge --url http://192.168.1.50:8001/mcp
+npm install
+npm run build
+node dist/index.js --url http://<PHOS_IP>:8001/mcp
 ```
-
-Or run it without installing globally:
-
-```bash
-npx -y @phos/phos-mcp-bridge --url https://phos.example.com/mcp
-```
-
-Options:
-
-```text
---url <url>                 Required unless PHOS_MCP_URL is set
---timeout <milliseconds>    Per-request timeout (default: 30000)
---connect-timeout <ms>      Initial MCP connection timeout (default: 10000)
---header "Name: value"      Extra HTTP header; may be repeated
---token <token>             Sends Authorization: Bearer <token>
---insecure                  Explicitly disable HTTPS certificate validation
---log-level <level>         silent, error, warn, info, debug
-```
-
-`PHOS_MCP_URL`, `PHOS_MCP_TOKEN`, and `PHOS_MCP_TIMEOUT` provide environment
-defaults. CLI values take precedence. Credentials are never logged. HTTPS
-certificate validation is enabled by default; `--insecure` is for development
-only and emits a stderr warning.
-
-All human diagnostics are written to stderr. stdout is reserved exclusively
-for MCP stdio traffic.
 
 ## Claude Code
 
 Claude Code currently supports local stdio servers through `claude mcp add`.
-The following adds this bridge in the current project scope:
+Build the bridge first, then configure Node to run the compiled entry point.
+Use an **absolute path** for `dist/index.js`: Claude Code can launch MCP
+servers with a working directory other than this repository, so a relative
+path such as `dist/index.js` is not reliable.
 
 ```bash
-claude mcp add phos -- npx -y @phos/phos-mcp-bridge \
-  --url http://192.168.1.50:8001/mcp
+claude mcp add phos -- node \
+  /absolute/path/to/phos-mcp-bridge/dist/index.js \
+  --url http://<PHOS_IP>:8001/mcp
+```
+
+For example, for a checkout at `/Users/xxx/Documents/dev/phos-mcp-bridge`:
+
+```bash
+claude mcp add phos -- node \
+  /Users/xxxxx/Documents/dev/phos-mcp-bridge/dist/index.js \
+  --url http://<PHOS_IP>:8001/mcp
 ```
 
 Use `--scope user` before `phos` to make it available across projects. For a
-checked-in project configuration, use this `.mcp.json` entry:
+checked-in project configuration, use this `.mcp.json` entry (replace the path
+and PHOS address for each developer):
 
 ```json
 {
   "mcpServers": {
     "phos": {
-      "command": "npx",
-      "args": ["-y", "@phos/phos-mcp-bridge", "--url", "http://192.168.1.50:8001/mcp"]
+      "command": "node",
+      "args": [
+        "/absolute/path/to/phos-mcp-bridge/dist/index.js",
+        "--url",
+        "http://<PHOS_IP>:8001/mcp"
+      ]
     }
   }
 }
 ```
 
-On native Windows, wrap `npx` as `cmd /c npx` when configuring a stdio server.
+For a shared configuration, prefer an environment variable or a developer-local
+MCP configuration instead of committing a machine-specific absolute path. On
+native Windows, use an absolute Windows path, for example
+`C:\\dev\\phos-mcp-bridge\\dist\\index.js`; if `node` is not on the
+launcher's `PATH`, use its absolute path as `command` too.
 This follows the current [Claude Code MCP documentation](https://docs.anthropic.com/en/docs/claude-code/mcp).
 
 ## Claude Desktop
 
 For a local-development stdio server, add the following to the `mcpServers`
-section of `claude_desktop_config.json`, then restart Claude Desktop:
+section of `claude_desktop_config.json`, then restart Claude Desktop. As with
+Claude Code, build first and use an **absolute** path to `dist/index.js`.
 
 ```json
 {
   "mcpServers": {
     "phos": {
-      "command": "npx",
-      "args": ["-y", "@phos/phos-mcp-bridge", "--url", "http://192.168.1.50:8001/mcp"]
+      "command": "node",
+      "args": [
+        "/absolute/path/to/phos-mcp-bridge/dist/index.js",
+        "--url",
+        "http://<PHOS_IP>:8001/mcp"
+      ]
     }
   }
 }
