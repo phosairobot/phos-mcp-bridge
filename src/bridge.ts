@@ -18,13 +18,24 @@ export async function startBridge(options: BridgeOptions): Promise<BridgeHandle>
   stdio = serveStdio(async () => {
     const server = new Server(
       { name: "phos-mcp-bridge", version: "0.1.0" },
-      { capabilities: remote.supportsTools() ? { tools: {} } : {} }
+      {
+        capabilities: {
+          ...(remote.supportsTools() ? { tools: {} } : {}),
+          ...(remote.supportsResources() ? { resources: {} } : {})
+        }
+      }
     );
     server.setRequestHandler("tools/list", async request =>
       remote.listTools(request.params?.cursor)
     );
     server.setRequestHandler("tools/call", async request =>
       remote.callTool(request.params)
+    );
+    server.setRequestHandler("resources/list", async request =>
+      remote.listResources(request.params?.cursor)
+    );
+    server.setRequestHandler("resources/read", async request =>
+      remote.readResource(request.params)
     );
     return server;
   }, { onerror: error => logger.error(error.message) });
