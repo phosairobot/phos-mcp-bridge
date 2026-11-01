@@ -10,9 +10,12 @@ MCP stdio client → phos-mcp-bridge → MCP Streamable HTTP → PHOS
 ```
 
 The remote server remains authoritative. The bridge dynamically forwards
-`tools/list` and `tools/call`, so newly published PHOS tools require no bridge
-change. Tool results, input schemas, metadata, structured output, and tool
-error results pass through unchanged.
+`tools/list`, `tools/call`, `resources/list`, and `resources/read`, so newly
+published PHOS tools and resources require no bridge change. Tool results,
+resource metadata (including URI and MIME type), and structured text/blob
+resource contents pass through unchanged. Resource listings and reads are
+refreshed from the remote server for each request; a replacement remote session
+therefore cannot retain stale bridge resource state.
 
 ## Build and run locally
 

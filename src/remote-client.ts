@@ -1,4 +1,12 @@
-import { Client, StreamableHTTPClientTransport, type CallToolResult, type ListToolsResult } from "@modelcontextprotocol/client";
+import {
+  Client,
+  StreamableHTTPClientTransport,
+  type CallToolResult,
+  type ListResourcesResult,
+  type ListToolsResult,
+  type ReadResourceRequestParams,
+  type ReadResourceResult
+} from "@modelcontextprotocol/client";
 import type { BridgeOptions } from "./cli.js";
 import { publicError } from "./errors.js";
 import type { Logger } from "./logging.js";
@@ -17,6 +25,10 @@ export class RemotePhosClient {
     return Boolean(this.client?.getServerCapabilities()?.tools);
   }
 
+  public supportsResources(): boolean {
+    return Boolean(this.client?.getServerCapabilities()?.resources);
+  }
+
   public async listTools(cursor?: string): Promise<ListToolsResult> {
     const client = await this.connected();
     try {
@@ -29,6 +41,28 @@ export class RemotePhosClient {
     try {
       // Never retry a tool call: PHOS may already have performed a physical action.
       return await client.callTool(params, { timeout: this.options.timeoutMs });
+    } catch (error) { throw publicError(error); }
+  }
+
+  public async listResources(cursor?: string): Promise<ListResourcesResult> {
+    const client = await this.connected();
+    try {
+      // PHOS is authoritative: do not serve a locally cached resource list.
+      return await client.listResources(cursor ? { cursor } : undefined, {
+        cacheMode: "refresh",
+        timeout: this.options.timeoutMs
+      });
+    } catch (error) { throw publicError(error); }
+  }
+
+  public async readResource(params: ReadResourceRequestParams): Promise<ReadResourceResult> {
+    const client = await this.connected();
+    try {
+      // Preserve the SDK's structured text/blob result without conversion.
+      return await client.readResource(params, {
+        cacheMode: "refresh",
+        timeout: this.options.timeoutMs
+      });
     } catch (error) { throw publicError(error); }
   }
 
