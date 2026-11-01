@@ -5,13 +5,22 @@ import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { Server, WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/server";
 
-async function startFakeRemote() {
+async function startFakeRemote({ resourceSubscriptions = true } = {}) {
+  const subscribedResources = new Set();
   let resources = [
     { uri: "test://dynamic-resource", name: "Dynamic resource", description: "Added outside the bridge", mimeType: "application/json" },
     { uri: "test://plain-text", name: "Plain text", mimeType: "text/plain" },
     { uri: "test://blob", name: "Blob", mimeType: "application/octet-stream" }
   ];
-  const server = new Server({ name: "fake-remote", version: "1.0.0" }, { capabilities: { tools: {}, resources: {} } });
+  const server = new Server(
+    { name: "fake-remote", version: "1.0.0" },
+    {
+      capabilities: {
+        tools: { listChanged: true },
+        resources: { listChanged: true, ...(resourceSubscriptions ? { subscribe: true } : {}) }
+      }
+    }
+  );
   server.setRequestHandler("tools/list", async () => ({ tools: [{ name: "ping", description: "test", inputSchema: { type: "object" } }] }));
   server.setRequestHandler("tools/call", async request => ({ content: [{ type: "text", text: `pong:${request.params.name}` }] }));
   server.setRequestHandler("resources/list", async () => ({ resources }));
@@ -26,6 +35,14 @@ async function startFakeRemote() {
       return { contents: [{ uri: request.params.uri, mimeType: "application/octet-stream", blob: "AAEC" }] };
     }
     throw new Error("Unknown resource URI");
+  });
+  server.setRequestHandler("resources/subscribe", async request => {
+    subscribedResources.add(request.params.uri);
+    return {};
+  });
+  server.setRequestHandler("resources/unsubscribe", async request => {
+    subscribedResources.delete(request.params.uri);
+    return {};
   });
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: () => "test-session", enableJsonResponse: true });
   await server.connect(transport);
@@ -46,6 +63,7 @@ async function startFakeRemote() {
     url: `http://127.0.0.1:${port}/mcp`,
     addResource: resource => { resources = [...resources, resource]; },
     setResources: next => { resources = next; },
+    subscribedResources,
     close: async () => {
       await transport.close();
       await new Promise(resolve => http.close(resolve));
@@ -59,6 +77,7 @@ test("forwards dynamic remote resources through stdio without changing tools", a
   const client = new Client({ name: "resource-e2e", version: "1.0.0" });
   try {
     await client.connect(stdio);
+    assert.equal(client.getServerCapabilities()?.resources?.subscribe, true);
     const listed = await client.listResources(undefined, { cacheMode: "refresh" });
     assert.deepEqual(listed.resources, [
       { uri: "test://dynamic-resource", name: "Dynamic resource", description: "Added outside the bridge", mimeType: "application/json" },
@@ -80,6 +99,25 @@ test("forwards dynamic remote resources through stdio without changing tools", a
     assert.deepEqual((await client.listResources(undefined, { cacheMode: "refresh" })).resources, []);
     assert.deepEqual((await client.listTools(undefined, { cacheMode: "refresh" })).tools.map(tool => tool.name), ["ping"]);
     assert.deepEqual(await client.callTool({ name: "ping" }), { content: [{ type: "text", text: "pong:ping" }] });
+    await client.subscribeResource({ uri: "phos://status" });
+    assert.deepEqual([...remote.subscribedResources], ["phos://status"]);
+    await client.subscribeResource({ uri: "phos://environment" });
+    assert.deepEqual([...remote.subscribedResources].sort(), ["phos://environment", "phos://status"]);
+    await client.unsubscribeResource({ uri: "phos://status" });
+    assert.deepEqual([...remote.subscribedResources], ["phos://environment"]);
+  } finally {
+    await stdio.close();
+    await remote.close();
+  }
+});
+
+test("does not advertise resource subscriptions when PHOS does not support them", async () => {
+  const remote = await startFakeRemote({ resourceSubscriptions: false });
+  const stdio = new StdioClientTransport({ command: process.execPath, args: ["dist/index.js", "--url", remote.url], stderr: "pipe" });
+  const client = new Client({ name: "capability-e2e", version: "1.0.0" });
+  try {
+    await client.connect(stdio);
+    assert.notEqual(client.getServerCapabilities()?.resources?.subscribe, true);
   } finally {
     await stdio.close();
     await remote.close();

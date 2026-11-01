@@ -17,6 +17,16 @@ resource contents pass through unchanged. Resource listings and reads are
 refreshed from the remote server for each request; a replacement remote session
 therefore cannot retain stale bridge resource state.
 
+When PHOS advertises modern MCP change-notification capabilities, the bridge
+also maintains one long-lived remote `subscriptions/listen` stream and forwards
+tool/resource-list change notifications to local stdio subscribers. Each local
+resource subscription is enforced by the bridge's subscribed-URI set.
+When PHOS advertises `resources.subscribe`, the bridge advertises it locally
+and tracks the subscribed resource URIs. On a modern PHOS session it replaces
+the one upstream `subscriptions/listen` stream with an updated
+`resourceSubscriptions` filter; on a legacy session it forwards the SDK's
+`resources/subscribe` and `resources/unsubscribe` operations directly.
+
 ## Build and run locally
 
 This package is not published to npm yet. Build it from this repository:
