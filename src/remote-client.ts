@@ -29,10 +29,14 @@ export class RemotePhosClient {
   private notificationSink?: (notification: ChangeNotification) => void | Promise<void>;
   private readonly subscribedResources = new Set<string>();
   private subscriptionUpdate: Promise<void> = Promise.resolve();
+  private recovery?: Promise<void>;
+  private recoveryTimer?: NodeJS.Timeout;
+  private closed = false;
+  private recoveryBlocked = false;
 
   public constructor(private readonly options: BridgeOptions, private readonly logger: Logger) {}
 
-  public async connect(): Promise<void> { await this.connected(); }
+  public async connect(): Promise<void> { this.closed = false; await this.connected(); }
 
   public supportsTools(): boolean {
     return Boolean(this.client?.getServerCapabilities()?.tools);
@@ -53,6 +57,7 @@ export class RemotePhosClient {
   public async forwardSubscriptions(sink: (notification: ChangeNotification) => void | Promise<void>): Promise<void> {
     this.notificationSink = sink;
     await this.replaceSubscription(await this.connected());
+    this.scheduleHealthCheck();
   }
 
   public supportsResourceSubscriptions(): boolean {
@@ -123,6 +128,9 @@ export class RemotePhosClient {
   }
 
   public async close(): Promise<void> {
+    this.closed = true;
+    if (this.recoveryTimer) clearTimeout(this.recoveryTimer);
+    this.recoveryTimer = undefined;
     const subscription = this.subscription;
     this.subscription = undefined;
     try { await subscription?.close(); } catch { /* best-effort subscription teardown */ }
@@ -170,11 +178,12 @@ export class RemotePhosClient {
       reconnectionOptions: { maxReconnectionDelay: 5_000, initialReconnectionDelay: 250, reconnectionDelayGrowFactor: 1.5, maxRetries: 0 }
     });
     transport.onclose = () => {
-      this.logger.warn("PHOS MCP session closed; the next request will establish a fresh session.");
+      this.logger.warn("PHOS upstream disconnected");
       if (this.transport === transport) {
         this.subscription = undefined;
         this.transport = undefined;
         this.client = undefined;
+        this.scheduleRecovery();
       }
     };
     transport.onerror = error => this.logger.debug(`remote transport: ${this.error(error).message}`);
@@ -208,6 +217,7 @@ export class RemotePhosClient {
     this.client = client;
     this.logger.info("connected to PHOS MCP server");
     await this.replaceSubscription(client);
+    this.scheduleHealthCheck();
     return client;
   }
 
@@ -235,10 +245,66 @@ export class RemotePhosClient {
     try {
       this.subscription = await client.listen(filter, { timeout: this.options.connectTimeoutMs });
       this.logger.info("forwarding PHOS subscription notifications");
+      if (this.subscribedResources.size > 0) this.logger.info(`PHOS subscriptions restored count=${this.subscribedResources.size}`);
     } catch (error) {
       // Requests remain usable when a server advertises a capability but does
       // not accept a subscription stream.
       this.logger.warn(`PHOS subscription forwarding unavailable: ${this.error(error).message}`);
+    }
+  }
+
+  /** Detect a restarted upstream even when the only active traffic is listen. */
+  private scheduleHealthCheck(): void {
+    if (this.closed || this.recoveryBlocked || !this.notificationSink || this.recoveryTimer) return;
+    this.recoveryTimer = setTimeout(() => {
+      this.recoveryTimer = undefined;
+      void this.healthCheck();
+    }, 2_000);
+    this.recoveryTimer.unref();
+  }
+
+  private async healthCheck(): Promise<void> {
+    const client = this.client;
+    if (!client || this.closed || this.recoveryBlocked) return this.scheduleHealthCheck();
+    try {
+      await client.ping({ timeout: this.options.connectTimeoutMs });
+    } catch (error) {
+      this.logger.warn("PHOS upstream health check failed");
+      if (this.client === client) {
+        this.subscription = undefined;
+        this.client = undefined;
+        this.transport = undefined;
+      }
+      this.scheduleRecovery(error);
+      return;
+    }
+    this.scheduleHealthCheck();
+  }
+
+  private scheduleRecovery(reason?: unknown): void {
+    if (this.closed || this.recoveryBlocked || this.recovery) return;
+    this.recovery = this.recover(reason).finally(() => { this.recovery = undefined; });
+  }
+
+  private async recover(reason?: unknown): Promise<void> {
+    this.logger.info("PHOS upstream reconnecting");
+    try {
+      await this.connected();
+      this.logger.info("PHOS upstream reconnected");
+    } catch (error) {
+      if (isAuthenticationFailure(error)) {
+        this.recoveryBlocked = true;
+        this.logger.error("PHOS upstream reconnect failed: authentication failure");
+        return;
+      }
+      this.logger.warn(`PHOS upstream reconnect failed: ${this.error(reason ?? error).message}`);
+      if (!this.closed) {
+        this.recoveryTimer = setTimeout(() => {
+          this.recoveryTimer = undefined;
+          this.scheduleRecovery();
+        }, 2_000);
+        this.recoveryTimer.unref();
+      }
     }
   }
 
