@@ -1,6 +1,6 @@
 export function publicError(error: unknown, redact: (text: string) => string = text => text): Error {
   const message = redact(errorText(error)).replace(/authorization\s*[:=]\s*bearer\s+[^\s,;"}]+/gi, "Authorization: Bearer [REDACTED]");
-  if (/\b401\b|\bunauthenticated\b|\bauthentication\s+(?:failed|required)\b|\binvalid\s+(?:bearer|token|credential)\b/i.test(message)) {
+  if (/\b401\b|\bunauthenticated\b|\bunauthorized\b|\bauthentication\s+(?:failed|required)\b|\binvalid\s+(?:bearer|token|credential)\b/i.test(message)) {
     return new Error("PHOS authentication failed");
   }
   // Preserve a PHOS MCP code (such as permission_denied), without returning an
@@ -18,7 +18,7 @@ export function publicError(error: unknown, redact: (text: string) => string = t
 }
 
 export function isAuthenticationFailure(error: unknown): boolean {
-  return /\b401\b|\bunauthenticated\b|\bauthentication\s+(?:failed|required)\b|\binvalid\s+(?:bearer|token|credential)\b/i.test(errorText(error));
+  return /\b401\b|\bunauthenticated\b|\bunauthorized\b|\bauthentication\s+(?:failed|required)\b|\binvalid\s+(?:bearer|token|credential)\b/i.test(errorText(error));
 }
 
 function errorText(error: unknown): string {

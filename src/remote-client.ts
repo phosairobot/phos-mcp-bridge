@@ -157,9 +157,15 @@ export class RemotePhosClient {
 
   private async openConnection(negotiateModern: boolean): Promise<Client> {
     this.logger.info(`connecting to PHOS at ${this.options.url.origin}${this.options.url.pathname}`);
+    const token = this.options.authToken();
     const transport = new StreamableHTTPClientTransport(this.options.url, {
-      // SDK transport applies requestInit to initialize, requests, and listen streams.
-      requestInit: { headers: { ...this.options.headers, ...this.options.authHeaders() } },
+      // In SDK 2.4, authProvider.token() is evaluated at the HTTP boundary for
+      // every POST, GET/listen, DELETE, and reconnect. The SDK merges it after
+      // requestInit headers and before its session/protocol headers.
+      ...(token ? { authProvider: { token: async () => token } } : {}),
+      // Keep non-sensitive caller headers in requestInit. Do not put bearer
+      // credentials here: authProvider owns Authorization on final requests.
+      requestInit: { headers: this.options.headers },
       // A dropped session is recovered only before a *future* request.
       reconnectionOptions: { maxReconnectionDelay: 5_000, initialReconnectionDelay: 250, reconnectionDelayGrowFactor: 1.5, maxRetries: 0 }
     });

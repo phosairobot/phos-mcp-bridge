@@ -25,6 +25,7 @@ async function startFakeRemote({ resourceSubscriptions = true, expectedToken } =
     }
   );
   const authorizations = [];
+  const requests = [];
   server.setRequestHandler("tools/list", async () => ({ tools: [{ name: "ping", description: "test", inputSchema: { type: "object" } }] }));
   server.setRequestHandler("tools/call", async request => ({ content: [{ type: "text", text: `pong:${request.params.name}` }] }));
   server.setRequestHandler("resources/list", async () => ({ resources }));
@@ -61,6 +62,8 @@ async function startFakeRemote({ resourceSubscriptions = true, expectedToken } =
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
     const body = chunks.length ? Buffer.concat(chunks) : undefined;
+    const message = body ? JSON.parse(body.toString("utf8")) : undefined;
+    requests.push({ authorization: request.headers.authorization, method: message?.method, headers: request.headers });
     const url = `http://127.0.0.1${request.url}`;
     const webRequest = new Request(url, { method: request.method, headers: request.headers, body });
     const webResponse = await transport.handleRequest(webRequest);
@@ -75,6 +78,7 @@ async function startFakeRemote({ resourceSubscriptions = true, expectedToken } =
     setResources: next => { resources = next; },
     subscribedResources,
     authorizations,
+    requests,
     close: async () => {
       await transport.close();
       await new Promise(resolve => http.close(resolve));
@@ -118,6 +122,25 @@ test("forwards dynamic remote resources through stdio without changing tools", a
     assert.deepEqual([...remote.subscribedResources], ["phos://environment"]);
   } finally {
     await stdio.close();
+    await remote.close();
+  }
+});
+
+test("injects PHOS_MCP_TOKEN through authProvider into the real initialize HTTP request", async () => {
+  const secret = "PHOS_INITIALIZE_BOUNDARY_TOKEN_7C31";
+  const remote = await startFakeRemote({ expectedToken: secret });
+  const options = parseCli(["--url", remote.url, "--header", "X-Site: integration"], { PHOS_MCP_TOKEN: secret });
+  const client = new RemotePhosClient(options, new Logger("silent", options.redact));
+  try {
+    await client.connect();
+    const initialize = remote.requests.find(request => request.method === "initialize");
+    assert.ok(initialize, "the local server received an initialize request");
+    assert.equal(initialize.authorization, `Bearer ${secret}`);
+    assert.equal(initialize.headers["x-site"], "integration");
+    assert.match(initialize.headers.accept, /application\/json/);
+    assert.match(initialize.headers["content-type"], /application\/json/);
+  } finally {
+    await client.close();
     await remote.close();
   }
 });

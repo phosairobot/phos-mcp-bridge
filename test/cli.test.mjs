@@ -22,12 +22,14 @@ test("environment token supplies a private authorization header without appearin
   const options = parseCli(["--url", "https://phos.example/mcp", "--header", "X-Site: lab"], { PHOS_MCP_TOKEN: secret });
   assert.deepEqual(options.headers, { "X-Site": "lab" });
   assert.deepEqual(options.authHeaders(), { Authorization: `Bearer ${secret}` });
+  assert.equal(options.authToken(), secret);
   assert.doesNotMatch(JSON.stringify(options), new RegExp(secret));
 });
 
 test("missing or empty environment token sends no authorization header", () => {
   assert.deepEqual(parseCli(["--url", "https://phos.example/mcp"], {}).authHeaders(), {});
   assert.deepEqual(parseCli(["--url", "https://phos.example/mcp"], { PHOS_MCP_TOKEN: "  " }).authHeaders(), {});
+  assert.equal(parseCli(["--url", "https://phos.example/mcp"], {}).authToken(), undefined);
 });
 
 test("rejects visible credential options", () => {

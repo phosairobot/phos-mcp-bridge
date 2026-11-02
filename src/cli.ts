@@ -7,6 +7,8 @@ export interface BridgeOptions {
   headers: Record<string, string>;
   /** Produces sensitive request headers without exposing them in public config. */
   authHeaders: () => Record<string, string>;
+  /** Supplies the bearer credential to the SDK transport without serializing it. */
+  authToken: () => string | undefined;
   redact: (text: string) => string;
   insecure: boolean;
   logLevel: LogLevel;
@@ -62,6 +64,7 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
     url, timeoutMs, connectTimeoutMs, headers, insecure, logLevel,
     // Keep the secret in a closure: JSON/string config dumps cannot reveal it.
     authHeaders: (): Record<string, string> => token ? { Authorization: `Bearer ${token}` } : {},
+    authToken: (): string | undefined => token,
     redact: text => token ? text.replaceAll(token, "[REDACTED]") : text
   };
 }
