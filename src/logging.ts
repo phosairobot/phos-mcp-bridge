@@ -3,7 +3,7 @@ export type LogLevel = "silent" | "error" | "warn" | "info" | "debug";
 const rank: Record<LogLevel, number> = { silent: 0, error: 1, warn: 2, info: 3, debug: 4 };
 
 export class Logger {
-  public constructor(private readonly level: LogLevel) {}
+  public constructor(private readonly level: LogLevel, private readonly redact: (text: string) => string = text => text) {}
 
   public error(message: string): void { this.write("error", message); }
   public warn(message: string): void { this.write("warn", message); }
@@ -11,6 +11,10 @@ export class Logger {
   public debug(message: string): void { this.write("debug", message); }
 
   private write(level: Exclude<LogLevel, "silent">, message: string): void {
-    if (rank[this.level] >= rank[level]) process.stderr.write(`[phos-mcp-bridge] ${level}: ${message}\n`);
+    if (rank[this.level] >= rank[level]) process.stderr.write(`[phos-mcp-bridge] ${level}: ${this.safe(message)}\n`);
+  }
+
+  private safe(message: string): string {
+    return this.redact(message).replace(/authorization\s*[:=]\s*bearer\s+[^\s,;"}]+/gi, "Authorization: Bearer [REDACTED]");
   }
 }

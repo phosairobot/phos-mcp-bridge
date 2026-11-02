@@ -17,7 +17,20 @@ test("CLI URL overrides PHOS_MCP_URL", () => {
   assert.equal(options.url.href, "http://local.test/mcp");
 });
 
-test("token becomes an authorization header without changing other headers", () => {
-  const options = parseCli(["--url", "https://phos.example/mcp", "--header", "X-Site: lab", "--token", "secret"], {});
-  assert.deepEqual(options.headers, { "X-Site": "lab", Authorization: "Bearer secret" });
+test("environment token supplies a private authorization header without appearing in public config", () => {
+  const secret = "PHOS_BRIDGE_SECRET_NEVER_LOG_82A1";
+  const options = parseCli(["--url", "https://phos.example/mcp", "--header", "X-Site: lab"], { PHOS_MCP_TOKEN: secret });
+  assert.deepEqual(options.headers, { "X-Site": "lab" });
+  assert.deepEqual(options.authHeaders(), { Authorization: `Bearer ${secret}` });
+  assert.doesNotMatch(JSON.stringify(options), new RegExp(secret));
+});
+
+test("missing or empty environment token sends no authorization header", () => {
+  assert.deepEqual(parseCli(["--url", "https://phos.example/mcp"], {}).authHeaders(), {});
+  assert.deepEqual(parseCli(["--url", "https://phos.example/mcp"], { PHOS_MCP_TOKEN: "  " }).authHeaders(), {});
+});
+
+test("rejects visible credential options", () => {
+  assert.throws(() => parseCli(["--url", "https://phos.example/mcp", "--token", "secret"], {}), /not supported/);
+  assert.throws(() => parseCli(["--url", "https://phos.example/mcp", "--header", "Authorization: Bearer secret"], {}), /PHOS_MCP_TOKEN/);
 });

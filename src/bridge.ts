@@ -7,7 +7,7 @@ import { RemotePhosClient } from "./remote-client.js";
 export interface BridgeHandle { close(): Promise<void>; }
 
 export async function startBridge(options: BridgeOptions): Promise<BridgeHandle> {
-  const logger = new Logger(options.logLevel);
+  const logger = new Logger(options.logLevel, options.redact);
   // Node's built-in fetch honours this process-only switch. It is set solely for
   // an explicit --insecure invocation and never for ordinary HTTPS connections.
   if (options.insecure) process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";

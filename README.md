@@ -37,6 +37,37 @@ npm run build
 node dist/index.js --url http://<PHOS_IP>:8001/mcp
 ```
 
+## PHOS authentication
+
+To connect to a PHOS deployment that requires MCP authentication, set the
+credential in the bridge process environment (not in its command line or URL):
+
+```bash
+export PHOS_MCP_TOKEN='credential-issued-by-phos'
+node dist/index.js --url http://<PHOS_IP>:8001/mcp
+```
+
+`PHOS_MCP_TOKEN` is optional. If it is absent or empty, the bridge sends no
+`Authorization` header, retaining compatibility with legacy PHOS deployments.
+When configured, the bridge applies `Authorization: Bearer <credential>` once
+through the MCP SDK's remote Streamable HTTP transport, covering
+initialization, normal requests, and long-lived subscription streams (including
+fresh sessions after a transport reconnect).
+
+The token is issued, rotated, revoked, and validated by PHOS Web Admin/PHOS;
+the bridge neither validates credentials nor resolves identities or permissions.
+Keep it in a secret manager or the MCP launcher's environment configuration.
+Credential rotation requires updating that secret source and restarting the
+bridge. A revoked, missing, or invalid credential causes a sanitized PHOS
+authentication failure. PHOS authorization results, including
+`permission_denied` for observer credentials and camera resources, pass through
+unchanged.
+
+Do not put credentials in `--url`, `--header`, or command-line arguments. The
+bridge deliberately rejects `--token` and `--header Authorization: ...` to
+avoid shell history and process-list exposure. Its normal and debug logs redact
+authorization values.
+
 ## Claude Code
 
 Claude Code currently supports local stdio servers through `claude mcp add`.
@@ -122,3 +153,14 @@ npm run build
 The bridge never automatically retries `tools/call`, including after a broken
 transport connection, because PHOS might have executed a physical action.
 Future requests establish a fresh MCP session when the previous one closes.
+
+For Inspector, provide the secret to the Inspector/bridge process environment,
+not after its `--` separator:
+
+```bash
+PHOS_MCP_TOKEN='credential-issued-by-phos' \
+  npx --yes @modelcontextprotocol/inspector@latest --tui \
+  --protocol-era modern \
+  node /absolute/path/to/phos-mcp-bridge/dist/index.js \
+  -- --url http://<PHOS_IP>:8001/mcp
+```

@@ -10,7 +10,7 @@ import {
   type UnsubscribeRequestParams
 } from "@modelcontextprotocol/client";
 import type { BridgeOptions } from "./cli.js";
-import { publicError } from "./errors.js";
+import { isAuthenticationFailure, publicError } from "./errors.js";
 import type { Logger } from "./logging.js";
 
 type ChangeNotification =
@@ -65,7 +65,7 @@ export class RemotePhosClient {
       try {
         await client.subscribeResource(params, { timeout: this.options.timeoutMs });
         return {};
-      } catch (error) { throw publicError(error); }
+      } catch (error) { throw this.error(error); }
     }
     this.subscribedResources.add(params.uri);
     await this.queueSubscriptionReplacement();
@@ -78,7 +78,7 @@ export class RemotePhosClient {
       try {
         await client.unsubscribeResource(params, { timeout: this.options.timeoutMs });
         return {};
-      } catch (error) { throw publicError(error); }
+      } catch (error) { throw this.error(error); }
     }
     this.subscribedResources.delete(params.uri);
     await this.queueSubscriptionReplacement();
@@ -89,7 +89,7 @@ export class RemotePhosClient {
     const client = await this.connected();
     try {
       return await client.listTools(cursor ? { cursor } : undefined, { cacheMode: "refresh", timeout: this.options.timeoutMs });
-    } catch (error) { throw publicError(error); }
+    } catch (error) { throw this.error(error); }
   }
 
   public async callTool(params: { name: string; arguments?: Record<string, unknown> }): Promise<CallToolResult> {
@@ -97,7 +97,7 @@ export class RemotePhosClient {
     try {
       // Never retry a tool call: PHOS may already have performed a physical action.
       return await client.callTool(params, { timeout: this.options.timeoutMs });
-    } catch (error) { throw publicError(error); }
+    } catch (error) { throw this.error(error); }
   }
 
   public async listResources(cursor?: string): Promise<ListResourcesResult> {
@@ -108,7 +108,7 @@ export class RemotePhosClient {
         cacheMode: "refresh",
         timeout: this.options.timeoutMs
       });
-    } catch (error) { throw publicError(error); }
+    } catch (error) { throw this.error(error); }
   }
 
   public async readResource(params: ReadResourceRequestParams): Promise<ReadResourceResult> {
@@ -119,7 +119,7 @@ export class RemotePhosClient {
         cacheMode: "refresh",
         timeout: this.options.timeoutMs
       });
-    } catch (error) { throw publicError(error); }
+    } catch (error) { throw this.error(error); }
   }
 
   public async close(): Promise<void> {
@@ -145,19 +145,21 @@ export class RemotePhosClient {
     try {
       return await this.openConnection(true);
     } catch (error) {
+      if (isAuthenticationFailure(error)) throw this.error(error);
       // Some pre-2026 Streamable HTTP servers reject the discovery probe
       // without a usable fallback response. Reopen a clean legacy session so
       // existing PHOS deployments keep their previous behavior.
-      this.logger.debug(`modern MCP negotiation failed; retrying legacy connection: ${publicError(error).message}`);
+      this.logger.debug(`modern MCP negotiation failed; retrying legacy connection: ${this.error(error).message}`);
       try { return await this.openConnection(false); }
-      catch (legacyError) { throw publicError(legacyError); }
+      catch (legacyError) { throw this.error(legacyError); }
     }
   }
 
   private async openConnection(negotiateModern: boolean): Promise<Client> {
     this.logger.info(`connecting to PHOS at ${this.options.url.origin}${this.options.url.pathname}`);
     const transport = new StreamableHTTPClientTransport(this.options.url, {
-      requestInit: { headers: this.options.headers },
+      // SDK transport applies requestInit to initialize, requests, and listen streams.
+      requestInit: { headers: { ...this.options.headers, ...this.options.authHeaders() } },
       // A dropped session is recovered only before a *future* request.
       reconnectionOptions: { maxReconnectionDelay: 5_000, initialReconnectionDelay: 250, reconnectionDelayGrowFactor: 1.5, maxRetries: 0 }
     });
@@ -169,7 +171,7 @@ export class RemotePhosClient {
         this.client = undefined;
       }
     };
-    transport.onerror = error => this.logger.debug(`remote transport: ${error.message}`);
+    transport.onerror = error => this.logger.debug(`remote transport: ${this.error(error).message}`);
     const client = new Client(
       { name: "phos-mcp-bridge", version: "0.1.0" },
       negotiateModern ? { versionNegotiation: { mode: "auto" } } : undefined
@@ -230,9 +232,11 @@ export class RemotePhosClient {
     } catch (error) {
       // Requests remain usable when a server advertises a capability but does
       // not accept a subscription stream.
-      this.logger.warn(`PHOS subscription forwarding unavailable: ${publicError(error).message}`);
+      this.logger.warn(`PHOS subscription forwarding unavailable: ${this.error(error).message}`);
     }
   }
+
+  private error(error: unknown): Error { return publicError(error, this.options.redact); }
 }
 
 async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {

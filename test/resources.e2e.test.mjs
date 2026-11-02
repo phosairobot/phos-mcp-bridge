@@ -4,8 +4,11 @@ import assert from "node:assert/strict";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { Server, WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/server";
+import { parseCli } from "../dist/cli.js";
+import { Logger } from "../dist/logging.js";
+import { RemotePhosClient } from "../dist/remote-client.js";
 
-async function startFakeRemote({ resourceSubscriptions = true } = {}) {
+async function startFakeRemote({ resourceSubscriptions = true, expectedToken } = {}) {
   const subscribedResources = new Set();
   let resources = [
     { uri: "test://dynamic-resource", name: "Dynamic resource", description: "Added outside the bridge", mimeType: "application/json" },
@@ -21,6 +24,7 @@ async function startFakeRemote({ resourceSubscriptions = true } = {}) {
       }
     }
   );
+  const authorizations = [];
   server.setRequestHandler("tools/list", async () => ({ tools: [{ name: "ping", description: "test", inputSchema: { type: "object" } }] }));
   server.setRequestHandler("tools/call", async request => ({ content: [{ type: "text", text: `pong:${request.params.name}` }] }));
   server.setRequestHandler("resources/list", async () => ({ resources }));
@@ -48,6 +52,12 @@ async function startFakeRemote({ resourceSubscriptions = true } = {}) {
   await server.connect(transport);
 
   const http = createServer(async (request, response) => {
+    authorizations.push(request.headers.authorization);
+    if (expectedToken && request.headers.authorization !== `Bearer ${expectedToken}`) {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: "authentication failed" }));
+      return;
+    }
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
     const body = chunks.length ? Buffer.concat(chunks) : undefined;
@@ -64,6 +74,7 @@ async function startFakeRemote({ resourceSubscriptions = true } = {}) {
     addResource: resource => { resources = [...resources, resource]; },
     setResources: next => { resources = next; },
     subscribedResources,
+    authorizations,
     close: async () => {
       await transport.close();
       await new Promise(resolve => http.close(resolve));
@@ -107,6 +118,52 @@ test("forwards dynamic remote resources through stdio without changing tools", a
     assert.deepEqual([...remote.subscribedResources], ["phos://environment"]);
   } finally {
     await stdio.close();
+    await remote.close();
+  }
+});
+
+test("forwards an environment bearer to initialization, calls, resources, and subscriptions", async () => {
+  const secret = "PHOS_BRIDGE_SECRET_NEVER_LOG_82A1";
+  const remote = await startFakeRemote({ expectedToken: secret });
+  const stdio = new StdioClientTransport({
+    command: process.execPath,
+    args: ["dist/index.js", "--url", remote.url, "--log-level", "debug"],
+    env: { ...process.env, PHOS_MCP_TOKEN: secret },
+    stderr: "pipe"
+  });
+  const client = new Client({ name: "authenticated-e2e", version: "1.0.0" });
+  try {
+    await client.connect(stdio);
+    await client.listTools(undefined, { cacheMode: "refresh" });
+    await client.callTool({ name: "ping" });
+    await client.listResources(undefined, { cacheMode: "refresh" });
+    await client.readResource({ uri: "test://plain-text" }, { cacheMode: "refresh" });
+    await client.subscribeResource({ uri: "phos://status" });
+    assert.ok(remote.authorizations.length >= 6);
+    assert.ok(remote.authorizations.every(value => value === `Bearer ${secret}`));
+    const stderr = await stdio.stderr;
+    if (stderr) assert.doesNotMatch(String(stderr), new RegExp(secret));
+  } finally {
+    await stdio.close();
+    await remote.close();
+  }
+});
+
+test("protected PHOS reports a sanitized authentication failure without an unauthenticated fallback", async () => {
+  const remote = await startFakeRemote({ expectedToken: "standard-token" });
+  const secret = "PHOS_BRIDGE_SECRET_NEVER_LOG_82A1";
+  const options = parseCli(["--url", remote.url], { PHOS_MCP_TOKEN: secret });
+  const client = new RemotePhosClient(options, new Logger("silent", options.redact));
+  try {
+    await assert.rejects(client.connect(), error => {
+      assert.match(error.message, /PHOS authentication failed/);
+      assert.doesNotMatch(error.message, new RegExp(secret));
+      return true;
+    });
+    assert.equal(remote.authorizations.length, 1);
+    assert.equal(remote.authorizations[0], `Bearer ${secret}`);
+  } finally {
+    await client.close();
     await remote.close();
   }
 });

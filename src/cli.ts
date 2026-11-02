@@ -5,6 +5,9 @@ export interface BridgeOptions {
   timeoutMs: number;
   connectTimeoutMs: number;
   headers: Record<string, string>;
+  /** Produces sensitive request headers without exposing them in public config. */
+  authHeaders: () => Record<string, string>;
+  redact: (text: string) => string;
   insecure: boolean;
   logLevel: LogLevel;
 }
@@ -16,7 +19,7 @@ Options:
   --timeout <milliseconds>    Request timeout (default: 30000; PHOS_MCP_TIMEOUT)
   --connect-timeout <ms>      Initial connection timeout (default: 10000)
   --header <Name: value>      Extra HTTP header; repeatable
-  --token <token>             Sends Authorization: Bearer <token> (or PHOS_MCP_TOKEN)
+  PHOS_MCP_TOKEN              Optional PHOS bearer credential (environment only)
   --insecure                  Disable TLS certificate verification (development only)
   --log-level <level>         silent, error, warn, info, or debug (default: error)
   --help                      Print this help to stderr
@@ -47,15 +50,23 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
   for (const entry of values["--header"] ?? []) {
     const separator = entry.indexOf(":");
     if (separator < 1) throw new Error("--header must be formatted as 'Name: value'");
-    headers[entry.slice(0, separator).trim()] = entry.slice(separator + 1).trim();
+    const name = entry.slice(0, separator).trim();
+    if (name.toLowerCase() === "authorization") throw new Error("Authorization must be supplied through PHOS_MCP_TOKEN, not --header");
+    headers[name] = entry.slice(separator + 1).trim();
   }
-  const token = values["--token"]?.at(-1) ?? env.PHOS_MCP_TOKEN;
-  if (token) headers.Authorization = `Bearer ${token}`;
+  if (values["--token"]) throw new Error("--token is not supported; set PHOS_MCP_TOKEN in the bridge process environment");
+  // An empty value deliberately behaves as no credential, preserving legacy PHOS compatibility.
+  const token = env.PHOS_MCP_TOKEN?.trim() || undefined;
   if (insecure && url.protocol !== "https:") throw new Error("--insecure is valid only with an HTTPS URL");
-  return { url, timeoutMs, connectTimeoutMs, headers, insecure, logLevel };
+  return {
+    url, timeoutMs, connectTimeoutMs, headers, insecure, logLevel,
+    // Keep the secret in a closure: JSON/string config dumps cannot reveal it.
+    authHeaders: (): Record<string, string> => token ? { Authorization: `Bearer ${token}` } : {},
+    redact: text => token ? text.replaceAll(token, "[REDACTED]") : text
+  };
 }
 
-export function writeStartupWarning(options: BridgeOptions, logger = new Logger(options.logLevel)): void {
+export function writeStartupWarning(options: BridgeOptions, logger = new Logger(options.logLevel, options.redact)): void {
   if (options.insecure) logger.warn("TLS certificate validation is DISABLED by --insecure; use only for development.");
 }
 
