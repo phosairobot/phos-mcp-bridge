@@ -22,7 +22,7 @@
     "lint": "npm run typecheck"
   },
   "keywords": ["mcp", "phos", "bridge", "stdio", "streamable-http"],
-  "license": "MIT",
+  "license": "Apache-2.0",
   "dependencies": {
     "@modelcontextprotocol/client": "^2.4.0",
     "@modelcontextprotocol/core": "^2.4.0",

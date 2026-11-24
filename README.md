@@ -1,13 +1,34 @@
 # PHOS MCP Bridge
 
+**A standalone Node.js 20+ transport bridge connecting local `stdio` MCP clients (Claude Desktop, Claude Code, and IDEs) to a remote PHOS robot over MCP Streamable HTTP.**
+
+[![GitHub Stars](https://img.shields.io/github/stars/phosairobot/phos-mcp-bridge?style=flat&logo=github)](https://github.com/phosairobot/phos-mcp-bridge/stargazers)
+[![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg?style=flat)](LICENSE)
+[![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933?style=flat&logo=nodedotjs&logoColor=white)](package.json)
+[![MCP](https://img.shields.io/badge/MCP-Streamable%20HTTP-8A2BE2?style=flat)](https://modelcontextprotocol.io/)
+[![Core Repo](https://img.shields.io/badge/Core%20Repo-PHOS-181717?style=flat&logo=github)](https://github.com/phosairobot/phos)
+
 `phos-mcp-bridge` is a standalone Node.js 20+ transport bridge for a remote
 PHOS MCP server. It exposes MCP over local stdio and forwards it to PHOS over
 MCP Streamable HTTP. It does not start PHOS or include PHOS runtime, robot,
 hardware, or Python dependencies.
 
-```text
-MCP stdio client → phos-mcp-bridge → MCP Streamable HTTP → PHOS
+> [!TIP]
+> **Connecting Claude Desktop or Claude Code to your PHOS robot?** Give [phos-mcp-bridge](https://github.com/phosairobot/phos-mcp-bridge) and the core [PHOS repository](https://github.com/phosairobot/phos) a ⭐ **Star** to follow protocol updates and new MCP capabilities!
+
+## Architecture & Transport Flow
+
+```mermaid
+flowchart LR
+    client["Local MCP Client<br/>(Claude Desktop / Claude Code / IDE)"]
+    bridge["phos-mcp-bridge<br/>(Node.js 20+)"]
+    phos["PHOS MCP Server<br/>(:8001/mcp)"]
+    client <-->|"stdio (JSON-RPC)"| bridge
+    bridge <-->|"Streamable HTTP + Bearer Token"| phos
 ```
+
+The Bearer token is optional for legacy PHOS deployments; see
+[PHOS authentication](#phos-authentication).
 
 The remote server remains authoritative. The bridge dynamically forwards
 `tools/list`, `tools/call`, `resources/list`, and `resources/read`, so newly
@@ -27,6 +48,10 @@ the one upstream `subscriptions/listen` stream with an updated
 `resourceSubscriptions` filter; on a legacy session it forwards the SDK's
 `resources/subscribe` and `resources/unsubscribe` operations directly.
 
+The bridge never automatically retries `tools/call`, including after a broken
+transport connection, because PHOS might have executed a physical action.
+Future requests establish a fresh MCP session when the previous one closes.
+
 ## Build and run locally
 
 This package is not published to npm yet. Build it from this repository:
@@ -36,6 +61,22 @@ npm install
 npm run build
 node dist/index.js --url http://<PHOS_IP>:8001/mcp
 ```
+
+### CLI options
+
+| Option | Environment variable | Purpose / default |
+| --- | --- | --- |
+| `--url <url>` | `PHOS_MCP_URL` | Required HTTP(S) MCP endpoint; the flag takes precedence. |
+| `--timeout <milliseconds>` | `PHOS_MCP_TIMEOUT` | Request timeout; default `30000`. |
+| `--connect-timeout <ms>` | — | Initial connection timeout; default `10000`. |
+| `--header 'Name: value'` | — | Repeatable extra HTTP header; `Authorization` is rejected. |
+| — | `PHOS_MCP_TOKEN` | Optional Bearer credential; environment only. |
+| `--insecure` | — | Disable TLS certificate verification for HTTPS development only. |
+| `--log-level <level>` | — | `silent`, `error`, `warn`, `info`, or `debug`; default `error`. |
+| `--help` | — | Print CLI help to stderr. |
+
+Timeout values must be positive integers in milliseconds. Logs go to stderr,
+keeping stdout available for the MCP stdio transport.
 
 ## PHOS authentication
 
@@ -82,7 +123,7 @@ claude mcp add phos -- node \
   --url http://<PHOS_IP>:8001/mcp
 ```
 
-For example, for a checkout at `/Users/xxx/Documents/dev/phos-mcp-bridge`:
+For example, for a checkout at `/Users/xxxxx/Documents/dev/phos-mcp-bridge`:
 
 ```bash
 claude mcp add phos -- node \
@@ -150,10 +191,6 @@ npm test
 npm run build
 ```
 
-The bridge never automatically retries `tools/call`, including after a broken
-transport connection, because PHOS might have executed a physical action.
-Future requests establish a fresh MCP session when the previous one closes.
-
 For Inspector, provide the secret to the Inspector/bridge process environment,
 not after its `--` separator:
 
@@ -164,3 +201,16 @@ PHOS_MCP_TOKEN='credential-issued-by-phos' \
   node /absolute/path/to/phos-mcp-bridge/dist/index.js \
   -- --url http://<PHOS_IP>:8001/mcp
 ```
+
+## PHOS Ecosystem
+
+| Repository | Role |
+| --- | --- |
+| **[phos](https://github.com/phosairobot/phos)** | Core Raspberry Pi robot runtime, Vision, Voice, Web Admin, REST API & MCP Server. |
+| **[phos-mcp-bridge](https://github.com/phosairobot/phos-mcp-bridge)** | Local `stdio` ↔ remote `Streamable HTTP` MCP transport bridge. |
+| **[phos-esp32](https://github.com/phosairobot/phos-esp32)** | Official ESP32 hardware controller firmware (`phos-hw v1`). |
+
+## License
+
+Licensed under [Apache-2.0](LICENSE). See the [PHOS documentation](https://phosairobot.github.io/phos/)
+for the robot runtime, setup, and MCP server.
